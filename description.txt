@@ -1,0 +1,10 @@
+Call in air strikes and expand your capabilities and effectiveness on the battlefield on land, air, and sea.
+
+Host editable server options:
+ - strike cooldown 
+ - impact count 
+ - strike impact radius 
+ - strike impact interval
+ - strike delay
+
+Players have the option to turn PvP off.
