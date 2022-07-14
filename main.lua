@@ -1,11 +1,9 @@
--- Airstrike!
--- by dinoman 2021
+-- Airstrike! --
+-- developed by dinoman, ticibi 2021 --
 
 local playerDataTable = {}
-local globalTimer = 0
-local localTimer = 0
 local impactCount = 10
-local cooldown = 30
+local cooldown = 0
 local strikeInterval = 25
 local strikeRadius = 50
 local strikeDelay = 5
@@ -18,10 +16,38 @@ local FX = {
     "PFB_Explosion_Small",
     "PFB_Explosion_XL",
 }
+local infoPageText = {
+    "---- cooldown ----",
+    "(in seconds)",
+    "time to wait after calling in a strike",
+    " ",
+    "---- impact count ----",
+    "number of explosions per strike",
+    " ",
+    "---- strike radius ----",
+    "distance around target in which",
+    "explosions will occur:",
+    "higher value = farther from target",
+    "and less accurate",
+    "lower value = closer to target",
+    "and more accurate",
+    " ",
+    "---- strike interval ----",
+    "(in milliseconds)",
+    "time in between consecutive explosions",
+    "higher value = more wait time",
+    "lower value = less wait time",
+    " ",
+    "---- strike delay ----",
+    "(in seconds)",
+    "wait time in between calling in an",
+    "airstrike and strike execution",
+}
 
--------------------- Begin --------------------
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
 
-function addPlayerData(playerId)
+function AddPlayerData(playerId)
     playerDataTable[playerId] = {
         pvpEnabled = true,
         targetSelf = true,
@@ -34,247 +60,255 @@ function addPlayerData(playerId)
         prestrikeCountdown = strikeDelay,
         cooldownTimer = cooldown,
         target = nil,
+        fxIndex = 1,
+        localTimer = 0,
+        globalTimer = 0,
     }
 end
 
 function onPlayerJoined(player)
-    tm.os.Log(tm.players.GetPlayerName(player.playerId) .. " joined the server")
-    addPlayerData(player.playerId)
-    initializeUI_AndKeybinds(player.playerId)
-    loadCustomResources()
-end
-
-function onPlayerLeft(player)
-    --tm.os.Log(tm.players.GetPlayerName(player.playerId) .. " left the server")
-end
-
-function initializeUI_AndKeybinds(playerId)
-    homePage(playerId)
-    --tm.input.RegisterFunctionToKeyDownCallback(playerId, "" ,"")
-    --tm.input.RegisterFunctionToKeyUpCallback(playerId, "", "")
-end
-
-function loadCustomResources()
-    --tm.physics.AddMesh("", "")
-    --tm.physics.AddTexture("", "")
+    AddPlayerData(player.playerId)
+    HomePage(player.playerId)
 end
 
 tm.players.OnPlayerJoined.add(onPlayerJoined)
-tm.players.OnPlayerLeft.add(onPlayerLeft)
 
--------------------- Game logic --------------------
 
 function update()
-    local playerList = tm.players.CurrentPlayers()
-    for k, player in pairs(playerList) do
-        local playerData = playerDataTable[player.playerId]
-
-        if localTimer > 10 then
+    local players = tm.players.CurrentPlayers()
+    for i, player in pairs(players) do
+        local playerId = player.playerId
+        local playerData = playerDataTable[playerId]
+        if playerData.localTimer > 10 then
             if playerData.prestrike then
-                if playerData.prestrikeCountdown > 0 then
-                    tm.playerUI.SetUIValue(player.playerId, "prestrike", "" .. playerData.prestrikeCountdown .. " seconds to impact")
-                    playerData.prestrikeCountdown = playerData.prestrikeCountdown - 1
-                    localTimer = 0
-                else
-                    playerData.prestrike = false
-                    playerData.strikeActive = true
-                    playerData.prestrikeCountdown = strikeDelay
-                    homePage(player.playerId)
-                end
+                StartPrestrike(playerId)
             end
-
             if playerData.strikeActive then
-                if playerData.strikeTimer > math.random(1, strikeInterval) then --customize interval
-                    if playerData.impactCount < impactCount then
-                        local targetPos = tm.players.GetPlayerTransform(playerData.target).GetPosition()
-                        local variance = varianceVector(strikeRadius) --customize radius
-                        tm.physics.SpawnObject(tm.vector3.op_Addition(targetPos, variance), "PFB_Explosion_Large")
-                        playerData.impactCount = playerData.impactCount + 1
-                        playerData.strikeTimer = 0
-                    else
-                        playerData.strikeActive = false
-                        playerData.isOnCooldown = true
-                        playerData.impactCount = 0
-                        playerData.strikeTimer = 0
-                        playerDataTable[playerData.target].isBeingTargeted = false
-                        tm.playerUI.SetUIValue(playerData.target, "warning", "")
-                        homePage(player.playerId)
-                    end
-                end
+                Airstrike(playerId)
             end
-
             if playerData.isOnCooldown then
-                if playerData.cooldownTimer > 0 then
-                    tm.playerUI.SetUIValue(player.playerId, "cooldown", "Cooldown: " .. playerData.cooldownTimer .. " seconds")
-                    playerData.cooldownTimer = playerData.cooldownTimer - 1
-                    localTimer = 0
-                else
-                    playerData.isOnCooldown = false
-                    homePage(player.playerId)
-                end
+                Cooldown(playerId)
             end
         end
-
-        localTimer = localTimer + 1
-        globalTimer = globalTimer + 1
-        playerData.strikeTimer = playerData.strikeTimer + 1
-        tm.playerUI.SetUIValue(player.playerId, "globaltime", "time: " .. globalTimer/10)
+        UpdateTimers(playerId)
     end
 end
 
-function startAirstrike(callbackData)
-    local playerData = playerDataTable[callbackData.playerId]
-    local targetId = tonumber(string.sub(callbackData.id, 8))
-    playerData.target = targetId
-    playerDataTable[targetId].isBeingTargeted = true
-    tm.playerUI.SetUIValue(targetId, "warning", "Airstrike Incoming! Take Cover!")
-    playerData.prestrike = true
-    playerData.cooldownTimer = cooldown
-    playerData.prestrikeCountdown = strikeDelay
-    homePage(callbackData.playerId)
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+
+function StartPrestrike(playerId)
+    local playerData = playerDataTable[playerId]
+    if playerData.prestrikeCountdown > 0 then
+        SetValue(playerId, "prestrike", "" .. playerData.prestrikeCountdown .. " seconds to impact")
+        playerData.prestrikeCountdown = playerData.prestrikeCountdown - 1
+        playerData.localTimer = 0
+    else
+        playerData.prestrike = false
+        playerData.strikeActive = true
+        playerData.prestrikeCountdown = strikeDelay
+        HomePage(playerId)
+    end
 end
 
--------------------- UI helpers --------------------
-
-function title(playerId, titleText)
-    tm.playerUI.AddUILabel(playerId, "title", titleText)
+function Airstrike(playerId)
+    local playerData = playerDataTable[playerId]
+    if playerData.strikeTimer > math.random(1, strikeInterval) then
+        if playerData.impactCount < impactCount then
+            local targetPos = tm.players.GetPlayerTransform(playerData.target).GetPosition()
+            local variance = varianceVector(strikeRadius)
+            local spawnPos = tm.vector3.op_Addition(targetPos, variance)
+            tm.physics.SpawnObject(spawnPos, FX[playerData.fxIndex])
+            playerData.impactCount = playerData.impactCount + 1
+            playerData.strikeTimer = 0
+        else
+            playerData.strikeActive = false
+            playerData.isOnCooldown = true
+            playerData.impactCount = 0
+            playerData.strikeTimer = 0
+            playerDataTable[playerData.target].isBeingTargeted = false
+            SetValue(playerData.target, "warning", "")
+            HomePage(playerId)
+        end
+    end
 end
 
-function divider(playerId)
+function Cooldown(playerId)
+    local playerData = playerDataTable[playerId]
+    if playerData.cooldownTimer > 0 then
+        SetValue(playerId, "cooldown", "Cooldown: " .. playerData.cooldownTimer .. " seconds")
+        playerData.cooldownTimer = playerData.cooldownTimer - 1
+        playerData.localTimer = 0
+    else
+        playerData.isOnCooldown = false
+        HomePage(playerId)
+    end
+end
+
+function UpdateTimers(playerId)
+    local playerData = playerDataTable[playerId]
+    playerData.localTimer = playerData.localTimer + 1
+    playerData.globalTimer = playerData.globalTimer + 1
+    playerData.strikeTimer = playerData.strikeTimer + 1
+    SetValue(playerId, "globaltime", "time: " .. playerData.globalTimer/10)
+end
+
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+
+function Clear(playerId)
+    tm.playerUI.ClearUI(playerId)
+end
+
+function Divider(playerId)
     tm.playerUI.AddUILabel(playerId, "divider", "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬") 
 end
 
-function gotoButton(playerId, buttonText, page)
-    tm.playerUI.AddUIButton(playerId, "goto", buttonText, page)
+function SetValue(playerId, key, text)
+    tm.playerUI.SetUIValue(playerId, key, text)
 end
 
-function returnHome(callbackData)
-    homePage(callbackData.playerId)
+function Label(playerId, key, text)
+    tm.playerUI.AddUILabel(playerId, key, text)
 end
 
--------------------- UI Pages --------------------
+function Button(playerId, key, text, func)
+    tm.playerUI.AddUIButton(playerId, key, text, func)
+end
 
-function homePage(playerId)
+function HomePage(playerId)
+    if type(playerId) ~= "number" then
+        playerId = playerId.playerId
+    end
     local playerData = playerDataTable[playerId]
-    tm.playerUI.ClearUI(playerId)
+    Clear(playerId)
     if playerData.isBeingTargeted then
-        tm.playerUI.AddUILabel(playerId, "warning", "Airstrike Incoming! Take Cover!")
+        Label(playerId, "warning", "Airstrike Incoming! Take Cover!")
     end
     if playerData.prestrike then
-        tm.playerUI.AddUILabel(playerId, "prestrike", "")
+        Label(playerId, "prestrike", "")
     elseif playerData.strikeActive then
-        tm.playerUI.AddUILabel(playerId, "active", "Airstrike under way")
+        Label(playerId, "active", "Airstrike under way")
     elseif playerData.isOnCooldown then
-        tm.playerUI.AddUILabel(playerId, "cooldown", "")
+        Label(playerId, "cooldown", "")
     elseif playerData.pvpEnabled then
-        tm.playerUI.AddUIButton(playerId, "airstrike", "Call in an Airstrike", targetingPage)
-        tm.playerUI.AddUIButton(playerId, "My Settings", "My Settings", playerSettingsPage)
+        Button(playerId, "airstrike", "call in an Airstrike!", TargetSelectPage)
+        Button(playerId, "My Settings", "my settings", PlayerSettingsPage)
         if playerId == 0 then
-            tm.playerUI.AddUIButton(playerId, "serversettings", "Server Settings", serverSettingsPage)
+            Button(playerId, "serversettings", "strike settings", ServerSettingsPage)
         end
     else
-        tm.playerUI.AddUILabel(playerId, "info1", "PvP is turned OFF and will stop")
-        tm.playerUI.AddUILabel(playerId, "info2", "other players from targeting you.")
-        tm.playerUI.AddUILabel(playerId, "info3", "If you want to call in airstrikes,")
-        tm.playerUI.AddUILabel(playerId, "info4", "turn PvP ON in My Settings")
-        tm.playerUI.AddUIButton(playerId, "My Settings", "My Settings", playerSettingsPage)
+        Label(playerId, "info1", "PvP is turned OFF and will stop")
+        Label(playerId, "info2", "other players from targeting you.")
+        Label(playerId, "info3", "If you want to call in airstrikes,")
+        Label(playerId, "info4", "turn PvP ON in My Settings")
+        Button(playerId, "My Settings", "My Settings", PlayerSettingsPage)
     end
-    --tm.playerUI.AddUILabel(playerId, "globaltime", "global time: " .. globalTimer) 
 end
 
-function targetingPage(callbackData)
-    local playerId = callbackData.playerId
-    local playerData = playerDataTable[playerId]
-    tm.playerUI.ClearUI(playerId)
-    title(playerId, "Select a target")
-    for _, player in pairs(tm.players.CurrentPlayers()) do
+function TargetSelectPage(callback)
+    local playerId = callback.playerId
+    Clear(playerId)
+    Label(playerId, "select target", "select a target")
+    local players = tm.players.CurrentPlayers()
+    for _, player in pairs(players) do
         local id = player.playerId
         if playerDataTable[id].pvpEnabled then
-            tm.playerUI.AddUIButton(playerId, "player_" .. id, tm.players.GetPlayerName(id), startAirstrike)
+            local playerName = tm.players.GetPlayerName(id)
+            Button(playerId, "player_" .. id, playerName, OnTriggerAirstrike)
         end
     end
-    gotoButton(playerId, "<< back", returnHome)
+    Button(playerId, "back", "<< back", HomePage)
 end
 
-function serverSettingsPage(callbackData)
-    local playerId = callbackData.playerId
-    tm.playerUI.ClearUI(playerId)
-    title(playerId, "Server Settings")
-    tm.playerUI.AddUIButton(playerId, "info", "Help", infoPage)
-    tm.playerUI.AddUIButton(playerId, "settings1", "cooldown: " .. cooldown .. " seconds", cycleCooldown)
-    tm.playerUI.AddUIButton(playerId, "settings2", "impact count: " .. impactCount, cycleImpactCount)
-    tm.playerUI.AddUIButton(playerId, "settings3", "strike radius: " .. strikeRadius, cycleStrikeRadius)
-    tm.playerUI.AddUIButton(playerId, "settings4", "strike interval: " .. strikeInterval, cycleStrikeInterval)
-    tm.playerUI.AddUIButton(playerId, "settings5", "strike delay: " .. strikeDelay, cycleStrikeDelay)
-    gotoButton(playerId, "<< back", returnHome)
+function HowToPage(callback)
+    local playerId = callback.playerId
+    Clear(playerId)
+    Label(playerId, "settings help", "Settings Help")
+    for _, text in ipairs(infoPageText) do
+        Label(playerId, "help", text)
+    end
+    Button(playerId, "back", "<< back", ServerSettingsPage)
 end
 
-function infoPage(callbackData)
-    local playerId = callbackData.playerId
-    tm.playerUI.ClearUI(playerId)
-    title(playerId, "Settings Help")
-    tm.playerUI.AddUILabel(playerId, "help1", " ---- cooldown ----")
-    tm.playerUI.AddUILabel(playerId, "help1.1", "wait time to call in another strike")
-    divider(playerId)
-    tm.playerUI.AddUILabel(playerId, "help2", " ---- impact count ----")
-    tm.playerUI.AddUILabel(playerId, "help2.1", "number of explosions in a strike")
-    divider(playerId)
-    tm.playerUI.AddUILabel(playerId, "help3", " ---- strike radius ---- ")
-    tm.playerUI.AddUILabel(playerId, "help3.1", "distance around the target in")
-    tm.playerUI.AddUILabel(playerId, "help3.2", "which impacts will strike")
-    tm.playerUI.AddUILabel(playerId, "help3.3", "higher value is farther from target")
-    tm.playerUI.AddUILabel(playerId, "help3.4", "and less accurate")
-    tm.playerUI.AddUILabel(playerId, "help3.5", "lower value is closer to target")
-    tm.playerUI.AddUILabel(playerId, "help3.6", "and more accurate")
-    divider(playerId)
-    tm.playerUI.AddUILabel(playerId, "help4", " ---- strike interval ---- ")
-    tm.playerUI.AddUILabel(playerId, "help4.1", "time between impacts")
-    tm.playerUI.AddUILabel(playerId, "help4.2", "lower value is less time")
-    tm.playerUI.AddUILabel(playerId, "help4.3", "higher value is more time")
-    divider(playerId)
-    tm.playerUI.AddUILabel(playerId, "help5", " ---- strike delay ---- ")
-    tm.playerUI.AddUILabel(playerId, "help5.1", "time (seconds) between calling in a")
-    tm.playerUI.AddUILabel(playerId, "help5.2", "strike and strike execution")
-    gotoButton(playerId, "<< back", serverSettingsPage)
+function PlayerSettingsPage(callback)
+    local playerId = callback.playerId
+    Clear(playerId)
+    Label(playerId, "my settings", "my settings")
+    if playerDataTable[playerId].pvpEnabled then
+        Button(playerId, "pvp", "pvp (on)", TogglePVP)
+    else
+        Button(playerId, "pvp", "pvp (off)", TogglePVP)
+    end
+    Button(playerId, "explosion model", FX[playerDataTable[playerId].fxIndex], CycleExplosion)
+    Button(playerId, "back", "<< back", HomePage)
 end
 
-function cycleCooldown(callbackData)
+function ServerSettingsPage(callback)
+    local playerId = callback.playerId
+    Clear(playerId)
+    Label(playerId, "server settings", "server settings")
+    Button(playerId, "help", "how to use", HowToPage)
+    Button(playerId, "settings1", "cooldown: " .. cooldown .. "s", CycleCooldown)
+    Button(playerId, "settings2", "impact count: " .. impactCount, CycleImpactCount)
+    Button(playerId, "settings3", "strike radius: " .. strikeRadius .. "m", CycleStrikeRadius)
+    Button(playerId, "settings4", "strike interval: " .. strikeInterval .. "ms", CycleStrikeInterval)
+    Button(playerId, "settings5", "strike delay: " .. strikeDelay .. "s", CycleStrikeDelay)
+    Button(playerId, "back", "<< back", HomePage)
+end
+
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+
+function OnTriggerAirstrike(callback)
+    local playerData = playerDataTable[callback.playerId]
+    local targetId = tonumber(string.sub(callback.id, 8))
+    playerData.target = targetId
+    playerDataTable[targetId].isBeingTargeted = true
+    SetValue(targetId, "warning", "Airstrike Incoming! Take Cover!")
+    playerData.prestrike = true
+    playerData.cooldownTimer = cooldown
+    playerData.prestrikeCountdown = strikeDelay
+    HomePage(callback.playerId)
+end
+
+function CycleCooldown(callback)
     if cooldown >= 120 then
         cooldown = cooldown + 20
     else
         cooldown = cooldown + 10
     end
     if cooldown > 300 then
-        cooldown = 10
+        cooldown = 0
     end
-    tm.playerUI.SetUIValue(callbackData.playerId, "settings1", "cooldown: " .. cooldown .. " seconds")
+    SetValue(callback.playerId, "settings1", "cooldown: " .. cooldown .. "s")
 end
 
-function cycleImpactCount(callbackData)
+function CycleImpactCount(callback)
     impactCount = impactCount + 5
     if impactCount > 50 then
         impactCount = 5
     end
-    tm.playerUI.SetUIValue(callbackData.playerId, "settings2", "impact count: " .. impactCount)
+    SetValue(callback.playerId, "settings2", "impact count: " .. impactCount)
 end
 
-function cycleStrikeRadius(callbackData)
+function CycleStrikeRadius(callback)
     strikeRadius = strikeRadius + 10
     if strikeRadius > 100 then
         strikeRadius = 10
     end
-    tm.playerUI.SetUIValue(callbackData.playerId, "settings3", "strike radius: " .. strikeRadius)
+    SetValue(callback.playerId, "settings3", "strike radius: " .. strikeRadius .. "m")
 end
 
-function cycleStrikeInterval(callbackData)
+function CycleStrikeInterval(callback)
     strikeInterval = strikeInterval + 5
     if strikeInterval > 50 then
         strikeInterval = 5
     end
-    tm.playerUI.SetUIValue(callbackData.playerId, "settings4", "strike interval: " .. strikeInterval)
+    SetValue(callback.playerId, "settings4", "strike interval: " .. strikeInterval .. "ms")
 end
 
-function cycleStrikeDelay(callbackData)
+function CycleStrikeDelay(callback)
     if strikeDelay < 5 then
         strikeDelay = strikeDelay + 1
     else
@@ -283,47 +317,31 @@ function cycleStrikeDelay(callbackData)
     if strikeDelay > 30 then
         strikeDelay = 1
     end
-    tm.playerUI.SetUIValue(callbackData.playerId, "settings5", "strike delay: " .. strikeDelay)
+    SetValue(callback.playerId, "settings5", "strike delay: " .. strikeDelay .. "s")
 end
 
-function playerSettingsPage(callbackData)
-    local playerId = callbackData.playerId
-    tm.playerUI.ClearUI(playerId)
-    title(playerId, "My Settings")
-    if playerDataTable[playerId].pvpEnabled then
-        tm.playerUI.AddUIButton(playerId, "pvp", "PvP: (on)", togglePvp)
-    else
-        tm.playerUI.AddUIButton(playerId, "pvp", "PvP: (off)", togglePvp)
-    end
-    --if playerDataTable[playerId].targetSelf then
-    --    tm.playerUI.AddUIButton(playerId, "targetself", "Target Self: (on)", toggleTargetSelf)
-    --else
-    --    tm.playerUI.AddUIButton(playerId, "targetself", "Target Self: (off)", toggleTargetSelf)
-    --end
-    gotoButton(playerId, "<< back", returnHome)
-end
-
-function toggleTargetSelf(callbackData)
-    local playerId = callbackData.playerId
-    playerDataTable[playerId].targetSelf = not playerDataTable[playerId].targetSelf
-    if playerDataTable[playerId].targetSelf then
-        tm.playerUI.SetUIValue(playerId, "targetself", "Target Self: (on)")
-    else
-        tm.playerUI.SetUIValue(playerId, "targetself", "Target Self: (off)")
-    end
-end
-
-function togglePvp(callbackData)
-    local playerId = callbackData.playerId
+function TogglePVP(callback)
+    local playerId = callback.playerId
     playerDataTable[playerId].pvpEnabled = not playerDataTable[playerId].pvpEnabled
     if playerDataTable[playerId].pvpEnabled then
-        tm.playerUI.SetUIValue(playerId, "pvp", "PvP: (on)")
+        SetValue(playerId, "pvp", "PvP (on)")
     else
-        tm.playerUI.SetUIValue(playerId, "pvp", "PvP: (off)")
+        SetValue(playerId, "pvp", "PvP (off)")
     end
 end
 
--------------------- Utils --------------------
+function CycleExplosion(callback)
+    local playerId = callback.playerId
+    if playerDataTable[playerId].fxIndex < #FX then
+        playerDataTable[playerId].fxIndex = playerDataTable[playerId].fxIndex + 1
+    else
+        playerDataTable[playerId].fxIndex = 1
+    end
+    SetValue(playerId, "explosion model", FX[playerDataTable[playerId].fxIndex])
+end
+
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
 
 function randomChoice(table)
     return table[math.random(#table)]
