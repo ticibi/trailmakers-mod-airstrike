@@ -116,9 +116,9 @@ function Airstrike(playerId)
     if playerData.strikeTimer > math.random(1, strikeInterval) then
         if playerData.impactCount < impactCount then
             local targetPos = tm.players.GetPlayerTransform(playerData.target).GetPosition()
-            local variance = varianceVector(strikeRadius)
+            local variance = VarianceVector(strikeRadius)
             local spawnPos = tm.vector3.op_Addition(targetPos, variance)
-            tm.physics.SpawnObject(spawnPos, FX[playerData.fxIndex])
+            Spawn(spawnPos, FX[playerData.fxIndex])
             playerData.impactCount = playerData.impactCount + 1
             playerData.strikeTimer = 0
         else
@@ -327,6 +327,8 @@ function CycleExplosion(callback)
     else
         playerDataTable[playerId].fxIndex = 1
     end
+    local playerPos = GetPlayerPos(playerId)
+    Spawn(playerPos, FX[playerDataTable[playerId].fxIndex])
     SetValue(playerId, "explosion model", FX[playerDataTable[playerId].fxIndex])
 end
 
@@ -340,14 +342,18 @@ function TogglePVP(callback)
     end
 end
 
----------------------------------------------------------------------------------
----------------------------------------------------------------------------------
-
-function randomChoice(table)
-    return table[math.random(#table)]
+function Spawn(pos, model)
+    return tm.physics.SpawnObject(pos, model)
 end
 
-function varianceVector(limit)
+function GetPlayerPos(playerId)
+    return tm.players.GetPlayerTransform(playerId).GetPosition()
+end
+
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+
+function VarianceVector(limit)
     return tm.vector3.Create(
         math.random(-limit, limit), 
         0, 
