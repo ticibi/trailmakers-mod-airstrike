@@ -81,7 +81,7 @@ function update()
         local playerData = playerDataTable[playerId]
         if playerData.localTimer > 10 then
             if playerData.prestrike then
-                StartPrestrike(playerId)
+                Prestrike(playerId)
             end
             if playerData.strikeActive then
                 Airstrike(playerId)
@@ -97,7 +97,7 @@ end
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
 
-function StartPrestrike(playerId)
+function Prestrike(playerId)
     local playerData = playerDataTable[playerId]
     if playerData.prestrikeCountdown > 0 then
         SetValue(playerId, "prestrike", "" .. playerData.prestrikeCountdown .. " seconds to impact")
@@ -194,7 +194,7 @@ function HomePage(playerId)
     elseif playerData.pvpEnabled then
         Button(playerId, "airstrike", "call in an Airstrike!", TargetSelectPage)
         Button(playerId, "My Settings", "my settings", PlayerSettingsPage)
-        if playerId == 0 then
+        if playerId == 0 then -- player is the Host
             Button(playerId, "serversettings", "strike settings", ServerSettingsPage)
         end
     else
@@ -202,7 +202,7 @@ function HomePage(playerId)
         Label(playerId, "info2", "other players from targeting you.")
         Label(playerId, "info3", "If you want to call in airstrikes,")
         Label(playerId, "info4", "turn PvP ON in My Settings")
-        Button(playerId, "My Settings", "My Settings", PlayerSettingsPage)
+        Button(playerId, "my settings", "my settings", PlayerSettingsPage)
     end
 end
 
@@ -211,7 +211,7 @@ function TargetSelectPage(callback)
     Clear(playerId)
     Label(playerId, "select target", "select a target")
     local players = tm.players.CurrentPlayers()
-    for _, player in pairs(players) do
+    for i, player in ipairs(players) do
         local id = player.playerId
         if playerDataTable[id].pvpEnabled then
             local playerName = tm.players.GetPlayerName(id)
@@ -320,16 +320,6 @@ function CycleStrikeDelay(callback)
     SetValue(callback.playerId, "settings5", "strike delay: " .. strikeDelay .. "s")
 end
 
-function TogglePVP(callback)
-    local playerId = callback.playerId
-    playerDataTable[playerId].pvpEnabled = not playerDataTable[playerId].pvpEnabled
-    if playerDataTable[playerId].pvpEnabled then
-        SetValue(playerId, "pvp", "PvP (on)")
-    else
-        SetValue(playerId, "pvp", "PvP (off)")
-    end
-end
-
 function CycleExplosion(callback)
     local playerId = callback.playerId
     if playerDataTable[playerId].fxIndex < #FX then
@@ -338,6 +328,16 @@ function CycleExplosion(callback)
         playerDataTable[playerId].fxIndex = 1
     end
     SetValue(playerId, "explosion model", FX[playerDataTable[playerId].fxIndex])
+end
+
+function TogglePVP(callback)
+    local playerId = callback.playerId
+    playerDataTable[playerId].pvpEnabled = not playerDataTable[playerId].pvpEnabled
+    if playerDataTable[playerId].pvpEnabled then
+        SetValue(playerId, "pvp", "PvP (on)")
+    else
+        SetValue(playerId, "pvp", "PvP (off)")
+    end
 end
 
 ---------------------------------------------------------------------------------
