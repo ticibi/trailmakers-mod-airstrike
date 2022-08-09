@@ -1,5 +1,8 @@
--- Airstrike! --
--- developed by dinoman, ticibi 2021 --
+-- Airstrike! Mod for Trailmakers, ticibi 2022
+-- name: Airstrike!
+-- author: Thomas Bresee
+-- description: 
+
 
 local playerDataTable = {}
 local impactCount = 10
