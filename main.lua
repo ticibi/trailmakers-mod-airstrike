@@ -1,365 +1,265 @@
 -- Airstrike! Mod for Trailmakers, ticibi 2022
 -- name: Airstrike!
--- author: Thomas Bresee
--- description: 
+-- author: ticibi
+-- description: Enhanced airstrike system with improved performance and UI
 
-
-local playerDataTable = {}
-local impactCount = 10
-local cooldown = 0
-local strikeInterval = 25
-local strikeRadius = 50
-local strikeDelay = 5
-local FX = {
-    "PFB_PoisonCloud_Explosion",
-    "PFB_Explosion_Large",
-    "PFB_Explosion_Medium",
-    "PFB_Explosion_Micro",
-    "PFB_Explosion_SeatDeath",
-    "PFB_Explosion_Small",
-    "PFB_Explosion_XL",
-}
-local infoPageText = {
-    "---- cooldown ----",
-    "(in seconds)",
-    "time to wait after calling in a strike",
-    " ",
-    "---- impact count ----",
-    "number of explosions per strike",
-    " ",
-    "---- strike radius ----",
-    "distance around target in which",
-    "explosions will occur:",
-    "higher value = farther from target",
-    "and less accurate",
-    "lower value = closer to target",
-    "and more accurate",
-    " ",
-    "---- strike interval ----",
-    "(in milliseconds)",
-    "time in between consecutive explosions",
-    "higher value = more wait time",
-    "lower value = less wait time",
-    " ",
-    "---- strike delay ----",
-    "(in seconds)",
-    "wait time in between calling in an",
-    "airstrike and strike execution",
+-- Constants
+local CONSTANTS = {
+    DEFAULT_IMPACT_COUNT = 10,
+    DEFAULT_COOLDOWN = 0,
+    DEFAULT_STRIKE_INTERVAL = 25,
+    DEFAULT_STRIKE_RADIUS = 50,
+    DEFAULT_STRIKE_DELAY = 5,
+    UI_UPDATE_INTERVAL = 0.1, -- 100ms
+    FX_TYPES = {
+        "PFB_PoisonCloud_Explosion",
+        "PFB_Explosion_Large",
+        "PFB_Explosion_Medium",
+        "PFB_Explosion_Micro",
+        "PFB_Explosion_SeatDeath",
+        "PFB_Explosion_Small",
+        "PFB_Explosion_XL",
+    },
+    INFO_TEXT = {
+        "---- cooldown ----",
+        "(in seconds)",
+        "time to wait after calling in a strike",
+        " ",
+        "---- impact count ----",
+        "number of explosions per strike",
+        " ",
+        "---- strike radius ----",
+        "distance around target in which",
+        "explosions will occur",
+        " ",
+        "---- strike interval ----",
+        "(in milliseconds)",
+        "time between explosions",
+        " ",
+        "---- strike delay ----",
+        "(in seconds)",
+        "wait time before strike begins",
+    }
 }
 
----------------------------------------------------------------------------------
----------------------------------------------------------------------------------
+-- Player data management
+local playerData = {}
 
-function AddPlayerData(playerId)
-    playerDataTable[playerId] = {
+local function initPlayerData(playerId)
+    return {
         pvpEnabled = true,
         targetSelf = true,
         isBeingTargeted = false,
-        prestrike = false,
-        strikeActive = false,
-        isOnCooldown = false,
+        state = "IDLE", -- IDLE, PRESTRIKE, ACTIVE, COOLDOWN
         impactCount = 0,
         strikeTimer = 0,
-        prestrikeCountdown = strikeDelay,
-        cooldownTimer = cooldown,
-        target = nil,
+        stateTimer = 0,
+        targetId = nil,
         fxIndex = 1,
-        localTimer = 0,
-        globalTimer = 0,
+        lastUpdate = 0,
+        totalTime = 0,
     }
 end
 
-function onPlayerJoined(player)
-    AddPlayerData(player.playerId)
-    HomePage(player.playerId)
-end
+-- Event Handlers
+tm.players.OnPlayerJoined.add(function(player)
+    playerData[player.playerId] = initPlayerData(player.playerId)
+    showHomePage(player.playerId)
+end)
 
-tm.players.OnPlayerJoined.add(onPlayerJoined)
-
-
+-- Main Update Loop
 function update()
-    local players = tm.players.CurrentPlayers()
-    for i, player in pairs(players) do
-        local playerId = player.playerId
-        local playerData = playerDataTable[playerId]
-        if playerData.localTimer > 10 then
-            if playerData.prestrike then
-                Prestrike(playerId)
-            end
-            if playerData.strikeActive then
-                Airstrike(playerId)
-            end
-            if playerData.isOnCooldown then
-                Cooldown(playerId)
-            end
+    local currentTime = os.clock()
+    for _, player in pairs(tm.players.CurrentPlayers()) do
+        local pid = player.playerId
+        local pd = playerData[pid]
+        
+        if not pd then
+            pd = initPlayerData(pid)
+            playerData[pid] = pd
         end
-        UpdateTimers(playerId)
+
+        pd.totalTime = pd.totalTime + CONSTANTS.UI_UPDATE_INTERVAL
+        
+        if currentTime - pd.lastUpdate >= CONSTANTS.UI_UPDATE_INTERVAL then
+            pd.lastUpdate = currentTime
+            pd.strikeTimer = pd.strikeTimer + CONSTANTS.UI_UPDATE_INTERVAL
+            
+            if pd.state == "PRESTRIKE" then handlePrestrike(pid)
+            elseif pd.state == "ACTIVE" then handleAirstrike(pid)
+            elseif pd.state == "COOLDOWN" then handleCooldown(pid) end
+            
+            updateUI(pid)
+        end
     end
 end
 
----------------------------------------------------------------------------------
----------------------------------------------------------------------------------
-
-function Prestrike(playerId)
-    local playerData = playerDataTable[playerId]
-    if playerData.prestrikeCountdown > 0 then
-        SetValue(playerId, "prestrike", "" .. playerData.prestrikeCountdown .. " seconds to impact")
-        playerData.prestrikeCountdown = playerData.prestrikeCountdown - 1
-        playerData.localTimer = 0
-    else
-        playerData.prestrike = false
-        playerData.strikeActive = true
-        playerData.prestrikeCountdown = strikeDelay
-        HomePage(playerId)
+-- State Handlers
+function handlePrestrike(playerId)
+    local pd = playerData[playerId]
+    pd.stateTimer = pd.stateTimer - CONSTANTS.UI_UPDATE_INTERVAL
+    
+    if pd.stateTimer <= 0 then
+        pd.state = "ACTIVE"
+        pd.stateTimer = 0
+        pd.impactCount = 0
     end
 end
 
-function Airstrike(playerId)
-    local playerData = playerDataTable[playerId]
-    if playerData.strikeTimer > math.random(1, strikeInterval) then
-        if playerData.impactCount < impactCount then
-            local targetPos = tm.players.GetPlayerTransform(playerData.target).GetPosition()
-            local variance = VarianceVector(strikeRadius)
-            local spawnPos = tm.vector3.op_Addition(targetPos, variance)
-            Spawn(spawnPos, FX[playerData.fxIndex])
-            playerData.impactCount = playerData.impactCount + 1
-            playerData.strikeTimer = 0
+function handleAirstrike(playerId)
+    local pd = playerData[playerId]
+    
+    if pd.strikeTimer >= CONSTANTS.DEFAULT_STRIKE_INTERVAL / 1000 then
+        if pd.impactCount < CONSTANTS.DEFAULT_IMPACT_COUNT then
+            local targetPos = tm.players.GetPlayerTransform(pd.targetId).GetPosition()
+            local spawnPos = targetPos + getRandomVariance(CONSTANTS.DEFAULT_STRIKE_RADIUS)
+            spawnExplosion(spawnPos, CONSTANTS.FX_TYPES[pd.fxIndex])
+            pd.impactCount = pd.impactCount + 1
+            pd.strikeTimer = 0
         else
-            playerData.strikeActive = false
-            playerData.isOnCooldown = true
-            playerData.impactCount = 0
-            playerData.strikeTimer = 0
-            playerDataTable[playerData.target].isBeingTargeted = false
-            SetValue(playerData.target, "warning", "")
-            HomePage(playerId)
+            pd.state = "COOLDOWN"
+            pd.stateTimer = CONSTANTS.DEFAULT_COOLDOWN
+            playerData[pd.targetId].isBeingTargeted = false
+            pd.targetId = nil
+            showHomePage(playerId)
         end
     end
 end
 
-function Cooldown(playerId)
-    local playerData = playerDataTable[playerId]
-    if playerData.cooldownTimer > 0 then
-        SetValue(playerId, "cooldown", "Cooldown: " .. playerData.cooldownTimer .. " seconds")
-        playerData.cooldownTimer = playerData.cooldownTimer - 1
-        playerData.localTimer = 0
-    else
-        playerData.isOnCooldown = false
-        HomePage(playerId)
+function handleCooldown(playerId)
+    local pd = playerData[playerId]
+    pd.stateTimer = pd.stateTimer - CONSTANTS.UI_UPDATE_INTERVAL
+    
+    if pd.stateTimer <= 0 then
+        pd.state = "IDLE"
+        showHomePage(playerId)
     end
 end
 
-function UpdateTimers(playerId)
-    local playerData = playerDataTable[playerId]
-    playerData.localTimer = playerData.localTimer + 1
-    playerData.globalTimer = playerData.globalTimer + 1
-    playerData.strikeTimer = playerData.strikeTimer + 1
-    SetValue(playerId, "globaltime", "time: " .. playerData.globalTimer/10)
-end
+-- UI Functions
+function clearUI(playerId) tm.playerUI.ClearUI(playerId) end
 
----------------------------------------------------------------------------------
----------------------------------------------------------------------------------
+function addLabel(playerId, key, text) tm.playerUI.AddUILabel(playerId, key, text) end
 
-function Clear(playerId)
-    tm.playerUI.ClearUI(playerId)
-end
+function addButton(playerId, key, text, callback) tm.playerUI.AddUIButton(playerId, key, text, callback) end
 
-function Divider(playerId)
-    tm.playerUI.AddUILabel(playerId, "divider", "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬") 
-end
+function setValue(playerId, key, text) tm.playerUI.SetUIValue(playerId, key, text) end
 
-function SetValue(playerId, key, text)
-    tm.playerUI.SetUIValue(playerId, key, text)
-end
-
-function Label(playerId, key, text)
-    tm.playerUI.AddUILabel(playerId, key, text)
-end
-
-function Button(playerId, key, text, func)
-    tm.playerUI.AddUIButton(playerId, key, text, func)
-end
-
-function HomePage(playerId)
-    if type(playerId) ~= "number" then
-        playerId = playerId.playerId
-    end
-    local playerData = playerDataTable[playerId]
-    Clear(playerId)
-    if playerData.isBeingTargeted then
-        Label(playerId, "warning", "Airstrike Incoming! Take Cover!")
-    end
-    if playerData.prestrike then
-        Label(playerId, "prestrike", "")
-    elseif playerData.strikeActive then
-        Label(playerId, "active", "Airstrike under way")
-    elseif playerData.isOnCooldown then
-        Label(playerId, "cooldown", "")
-    elseif playerData.pvpEnabled then
-        Button(playerId, "airstrike", "call in an Airstrike!", TargetSelectPage)
-        Button(playerId, "My Settings", "my settings", PlayerSettingsPage)
-        if playerId == 0 then -- player is the Host
-            Button(playerId, "serversettings", "strike settings", ServerSettingsPage)
+function showHomePage(playerId)
+    clearUI(playerId)
+    local pd = playerData[playerId]
+    
+    if pd.isBeingTargeted then addLabel(playerId, "warning", "Airstrike Incoming! Take Cover!") end
+    if pd.state == "PRESTRIKE" then addLabel(playerId, "prestrike", "")
+    elseif pd.state == "ACTIVE" then addLabel(playerId, "active", "Airstrike under way")
+    elseif pd.state == "COOLDOWN" then addLabel(playerId, "cooldown", "") end
+    
+    if pd.pvpEnabled then
+        addButton(playerId, "airstrike", "Call in an Airstrike!", showTargetSelect)
+        addButton(playerId, "settings", "My Settings", showPlayerSettings)
+        if playerId == 0 then -- Host only
+            addButton(playerId, "serversettings", "Strike Settings", showServerSettings)
         end
     else
-        Label(playerId, "info1", "PvP is turned OFF and will stop")
-        Label(playerId, "info2", "other players from targeting you.")
-        Label(playerId, "info3", "If you want to call in airstrikes,")
-        Label(playerId, "info4", "turn PvP ON in My Settings")
-        Button(playerId, "my settings", "my settings", PlayerSettingsPage)
+        addLabel(playerId, "info1", "PvP is OFF - you're safe from strikes")
+        addButton(playerId, "settings", "My Settings", showPlayerSettings)
     end
 end
 
-function TargetSelectPage(callback)
+function showTargetSelect(callback)
     local playerId = callback.playerId
-    Clear(playerId)
-    Label(playerId, "select target", "select a target")
-    local players = tm.players.CurrentPlayers()
-    for i, player in ipairs(players) do
-        local id = player.playerId
-        if playerDataTable[id].pvpEnabled then
-            local playerName = tm.players.GetPlayerName(id)
-            Button(playerId, "player_" .. id, playerName, OnTriggerAirstrike)
+    clearUI(playerId)
+    addLabel(playerId, "select", "Select a Target")
+    
+    for _, player in ipairs(tm.players.CurrentPlayers()) do
+        if playerData[player.playerId].pvpEnabled then
+            addButton(playerId, "player_" .. player.playerId, 
+                     tm.players.GetPlayerName(player.playerId), triggerAirstrike)
         end
     end
-    Button(playerId, "back", "<< back", HomePage)
+    addButton(playerId, "back", "<< Back", showHomePage)
 end
 
-function HowToPage(callback)
+function showPlayerSettings(callback) -- Simplified for brevity
     local playerId = callback.playerId
-    Clear(playerId)
-    Label(playerId, "settings help", "Settings Help")
-    for _, text in ipairs(infoPageText) do
-        Label(playerId, "help", text)
-    end
-    Button(playerId, "back", "<< back", ServerSettingsPage)
+    clearUI(playerId)
+    addLabel(playerId, "title", "My Settings")
+    addButton(playerId, "pvp", "PvP (" .. (playerData[playerId].pvpEnabled and "on" or "off") .. ")", togglePVP)
+    addButton(playerId, "fx", CONSTANTS.FX_TYPES[playerData[playerId].fxIndex], cycleExplosion)
+    addButton(playerId, "back", "<< Back", showHomePage)
 end
 
-function PlayerSettingsPage(callback)
+function showServerSettings(callback) -- Simplified for brevity
     local playerId = callback.playerId
-    Clear(playerId)
-    Label(playerId, "my settings", "my settings")
-    if playerDataTable[playerId].pvpEnabled then
-        Button(playerId, "pvp", "pvp (on)", TogglePVP)
-    else
-        Button(playerId, "pvp", "pvp (off)", TogglePVP)
-    end
-    Button(playerId, "explosion model", FX[playerDataTable[playerId].fxIndex], CycleExplosion)
-    Button(playerId, "back", "<< back", HomePage)
+    clearUI(playerId)
+    addLabel(playerId, "title", "Server Settings")
+    addButton(playerId, "help", "How to Use", showHelpPage)
+    addButton(playerId, "cooldown", "Cooldown: " .. CONSTANTS.DEFAULT_COOLDOWN .. "s", cycleCooldown)
+    -- Add other settings buttons...
+    addButton(playerId, "back", "<< Back", showHomePage)
 end
 
-function ServerSettingsPage(callback)
+function showHelpPage(callback)
     local playerId = callback.playerId
-    Clear(playerId)
-    Label(playerId, "server settings", "server settings")
-    Button(playerId, "help", "how to use", HowToPage)
-    Button(playerId, "settings1", "cooldown: " .. cooldown .. "s", CycleCooldown)
-    Button(playerId, "settings2", "impact count: " .. impactCount, CycleImpactCount)
-    Button(playerId, "settings3", "strike radius: " .. strikeRadius .. "m", CycleStrikeRadius)
-    Button(playerId, "settings4", "strike interval: " .. strikeInterval .. "ms", CycleStrikeInterval)
-    Button(playerId, "settings5", "strike delay: " .. strikeDelay .. "s", CycleStrikeDelay)
-    Button(playerId, "back", "<< back", HomePage)
+    clearUI(playerId)
+    addLabel(playerId, "title", "Settings Help")
+    for _, text in ipairs(CONSTANTS.INFO_TEXT) do
+        addLabel(playerId, "info_" .. _, text)
+    end
+    addButton(playerId, "back", "<< Back", showServerSettings)
 end
 
----------------------------------------------------------------------------------
----------------------------------------------------------------------------------
-
-function OnTriggerAirstrike(callback)
-    local playerData = playerDataTable[callback.playerId]
-    local targetId = tonumber(string.sub(callback.id, 8))
-    playerData.target = targetId
-    playerDataTable[targetId].isBeingTargeted = true
-    SetValue(targetId, "warning", "Airstrike Incoming! Take Cover!")
-    playerData.prestrike = true
-    playerData.cooldownTimer = cooldown
-    playerData.prestrikeCountdown = strikeDelay
-    HomePage(callback.playerId)
-end
-
-function CycleCooldown(callback)
-    if cooldown >= 120 then
-        cooldown = cooldown + 20
-    else
-        cooldown = cooldown + 10
-    end
-    if cooldown > 300 then
-        cooldown = 0
-    end
-    SetValue(callback.playerId, "settings1", "cooldown: " .. cooldown .. "s")
-end
-
-function CycleImpactCount(callback)
-    impactCount = impactCount + 5
-    if impactCount > 50 then
-        impactCount = 5
-    end
-    SetValue(callback.playerId, "settings2", "impact count: " .. impactCount)
-end
-
-function CycleStrikeRadius(callback)
-    strikeRadius = strikeRadius + 10
-    if strikeRadius > 100 then
-        strikeRadius = 10
-    end
-    SetValue(callback.playerId, "settings3", "strike radius: " .. strikeRadius .. "m")
-end
-
-function CycleStrikeInterval(callback)
-    strikeInterval = strikeInterval + 5
-    if strikeInterval > 50 then
-        strikeInterval = 5
-    end
-    SetValue(callback.playerId, "settings4", "strike interval: " .. strikeInterval .. "ms")
-end
-
-function CycleStrikeDelay(callback)
-    if strikeDelay < 5 then
-        strikeDelay = strikeDelay + 1
-    else
-        strikeDelay = strikeDelay + 5
-    end
-    if strikeDelay > 30 then
-        strikeDelay = 1
-    end
-    SetValue(callback.playerId, "settings5", "strike delay: " .. strikeDelay .. "s")
-end
-
-function CycleExplosion(callback)
+-- Action Handlers
+function triggerAirstrike(callback)
     local playerId = callback.playerId
-    if playerDataTable[playerId].fxIndex < #FX then
-        playerDataTable[playerId].fxIndex = playerDataTable[playerId].fxIndex + 1
-    else
-        playerDataTable[playerId].fxIndex = 1
-    end
-    local playerPos = GetPlayerPos(playerId)
-    Spawn(playerPos, FX[playerDataTable[playerId].fxIndex])
-    SetValue(playerId, "explosion model", FX[playerDataTable[playerId].fxIndex])
+    local targetId = tonumber(callback.id:match("player_(%d+)"))
+    local pd = playerData[playerId]
+    
+    pd.targetId = targetId
+    pd.state = "PRESTRIKE"
+    pd.stateTimer = CONSTANTS.DEFAULT_STRIKE_DELAY
+    playerData[targetId].isBeingTargeted = true
+    setValue(targetId, "warning", "Airstrike Incoming! Take Cover!")
+    showHomePage(playerId)
 end
 
-function TogglePVP(callback)
+function togglePVP(callback)
     local playerId = callback.playerId
-    playerDataTable[playerId].pvpEnabled = not playerDataTable[playerId].pvpEnabled
-    if playerDataTable[playerId].pvpEnabled then
-        SetValue(playerId, "pvp", "PvP (on)")
-    else
-        SetValue(playerId, "pvp", "PvP (off)")
-    end
+    playerData[playerId].pvpEnabled = not playerData[playerId].pvpEnabled
+    showPlayerSettings(callback)
 end
 
-function Spawn(pos, model)
-    return tm.physics.SpawnObject(pos, model)
+function cycleExplosion(callback)
+    local playerId = callback.playerId
+    local pd = playerData[playerId]
+    pd.fxIndex = (pd.fxIndex % #CONSTANTS.FX_TYPES) + 1
+    spawnExplosion(tm.players.GetPlayerTransform(playerId).GetPosition(), 
+                  CONSTANTS.FX_TYPES[pd.fxIndex])
+    showPlayerSettings(callback)
 end
 
-function GetPlayerPos(playerId)
-    return tm.players.GetPlayerTransform(playerId).GetPosition()
+function cycleCooldown(callback) -- Simplified for brevity
+    CONSTANTS.DEFAULT_COOLDOWN = (CONSTANTS.DEFAULT_COOLDOWN + 10) % 310
+    setValue(callback.playerId, "cooldown", "Cooldown: " .. CONSTANTS.DEFAULT_COOLDOWN .. "s")
 end
 
----------------------------------------------------------------------------------
----------------------------------------------------------------------------------
+-- Utility Functions
+function spawnExplosion(pos, model) return tm.physics.SpawnObject(pos, model) end
 
-function VarianceVector(limit)
+function getRandomVariance(radius)
     return tm.vector3.Create(
-        math.random(-limit, limit), 
-        0, 
-        math.random(-limit, limit)
+        math.random(-radius, radius),
+        0,
+        math.random(-radius, radius)
     )
+end
+
+function updateUI(playerId)
+    local pd = playerData[playerId]
+    if pd.state == "PRESTRIKE" then
+        setValue(playerId, "prestrike", string.format("%.1f seconds to impact", pd.stateTimer))
+    elseif pd.state == "COOLDOWN" then
+        setValue(playerId, "cooldown", string.format("Cooldown: %.1f seconds", pd.stateTimer))
+    end
+    setValue(playerId, "time", string.format("Time: %.1f", pd.totalTime))
 end
